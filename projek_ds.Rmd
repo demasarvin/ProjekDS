@@ -1,0 +1,230 @@
+---
+title: "projek_ds"
+author: "Demas Arvin Purba Anggana, Seno Aji Putra"
+date: "1/21/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(twitteR) # akses api twitter
+library(dplyr) # manipulasi data
+library(textclean) # cleaning data
+library(tm) # penggunaan corpus dalam cleaning data
+```
+
+
+```{r}
+consumer_key = "8TjhPfHy8IUds2XwrP8tg5nLN"
+consumer_secret = "FgTkHKCPiJC7kr8g22hIUK8ntbyvgreQg0tO5MIV0IL92Mv3dD"
+access_token = "589165873-Dw5tlEE0xX1b0zXbv3NI29UqR9vk5Lb60GsQCh0n"
+access_secret = "lesh4lkn1gR9KtS7yIxeWDhoZcsMYukyxADRidsaM8dmY"
+setup_twitter_oauth(consumer_key,consumer_secret,access_token,access_secret)
+```
+
+
+```{r}
+scrap <- searchTwitter('Joe Biden', n = 500, lang = "en")
+
+#convert lists to data.frames
+scrap <- twListToDF(scrap)
+```
+
+```{r}
+data_raw <- scrap %>%
+    select(screenName,text)
+name <- data_raw$screenName
+tweets <- data_raw$text %>% as.character()
+tweets <- gsub( "\n"," ",tweets)
+tweets <- gsub( "RT ", " ", tweets)
+tweets <- tweets %>% 
+  replace_html() %>% # replace html with blank 
+  replace_url()   # replace URLs with blank
+tweets <- tweets %>% 
+  replace_emoji(.) %>% 
+  replace_html(.)
+tweets <- tweets %>% 
+  replace_tag(tweets, pattern = "@([A-Za-z0-9_]+)",replacement="") %>%  # hapusmentions
+  replace_hash(tweets, pattern = "#([A-Za-z0-9_]+)",replacement="")      # hapus hashtags
+tweets <- strip(tweets)
+
+data <- data.frame(name = name, text = tweets)
+
+text <- Corpus(VectorSource(data$text))
+myStopwords = readLines("F:/projek_ds/stopword_en.txt")
+cleansw <- tm_map(text,removeWords,myStopwords)
+cleanspace <- tm_map(cleansw,stripWhitespace)
+
+data_clean <- data.frame(text=unlist(sapply(cleanspace, `[`)), stringsAsFactors=F)
+```
+
+```{r}
+## Emotions Plot
+
+library(syuzhet) #package analisis sentimen
+library(e1071) #algoritma naivebayes
+library(caret) #algoritma naivebayes
+
+tweet <- as.character(data_clean$text)
+
+s<-get_nrc_sentiment(tweet)
+combine<-cbind(data_clean$text,s)
+hasil_analisis<-data.frame(combine, stringsAsFactors=FALSE)
+par(mar=rep(3,4))
+barplot(colSums(s),col=rainbow(10),ylab='count',main='Emotions Plot')
+```
+
+```{r}
+## Wordcloud
+
+glimpse(data)
+
+set.seed(20)
+data<-data[sample(nrow(data)),]
+data<-data[sample(nrow(data)),]
+glimpse(data)
+
+corpus<-Corpus(VectorSource(data$text))
+
+
+# membersihkan data data yang tidak dibutuhkan 
+corpus.clean<-corpus%>%
+  tm_map(content_transformer(tolower))%>%
+  tm_map(removePunctuation)%>%
+  tm_map(removeNumbers)%>%
+  tm_map(removeWords,stopwords(kind="en"))%>%
+  tm_map(stripWhitespace)
+dtm<-DocumentTermMatrix(corpus.clean)
+
+data.train<-data[1:400,]
+data.test<-data[401:100,]
+dtm.train<-dtm[1:400,]
+dtm.test<-dtm[401:100,]
+    
+corpus.clean.train<-corpus.clean[1:400]
+corpus.clean.test<-corpus.clean[401:100]
+dim(dtm.train)
+fivefreq<-findFreqTerms(dtm.train,5)
+length(fivefreq)
+dtm.train.nb<-DocumentTermMatrix(corpus.clean.train,control = list(dictionary=fivefreq))
+
+dtm.test.nb<-DocumentTermMatrix(corpus.clean.test,control = list(dictionary=fivefreq))
+dim(dtm.test.nb)
+
+convert_count <- function(x){
+  y<-ifelse(x>0,1,0)
+  y<-factor(y,levels=c(0,1),labels=c("no","yes"))
+  y
+}
+trainNB<-apply(dtm.train.nb,2,convert_count)
+testNB<-apply(dtm.test.nb,1,convert_count)
+
+library(wordcloud)
+wordcloud(corpus.clean,min.freq = 4,max.words=100,random.order=F,colors=brewer.pal(8,"Dark2"))
+```
+
+```{r}
+# Shiny
+datas <- data
+
+tweet<- datas$text
+  
+  
+ui <- fluidPage(
+        mainPanel(
+            h1("Analisis Sentimen Joe Biden", align = "center"),
+            tabsetPanel(type = "tabs",
+                        # Output Data Dalam Tabel
+                         tabPanel("Data", DT::dataTableOutput('tbl')), 
+                        # Output Data sentimen dalam Tabel
+                         tabPanel("Data Sentimen", DT::dataTableOutput('tbl2')),
+                        # Plot
+                        tabPanel("Plot", plotOutput("scatterplot")), 
+                        # wordcloud
+                        tabPanel("Wordcloud", plotOutput("Wordcloud"))
+                        )
+        )
+    )
+# SERVER
+server <- function(input, output) {
+  
+  # Output Data
+  output$tbl = DT::renderDataTable({
+    DT::datatable(data, options = list(lengthChange = FALSE))
+  })
+  
+  #Output Plot
+  output$scatterplot <- renderPlot({(data)
+    
+    # merubah tipe data menjadi char
+    tweet <- as.character(data_clean$text)
+    
+    s<-get_nrc_sentiment(tweet)
+    combine <- cbind(data_clean$text,s)
+    hasil_analisis <-data.frame(combine, stringsAsFactors=FALSE)
+    View(hasil)
+    par(mar=rep(3,4))
+    barplot(colSums(s),col=rainbow(10),ylab='count',main='Emotions Plot')
+  }, height=400)
+  
+  # Output Data
+  output$tbl2 = DT::renderDataTable({
+    DT::datatable(hasil_analisis, options = list(lengthChange = FALSE))
+  })
+  
+  #Output Wordcloud
+  output$Wordcloud <- renderPlot({
+    set.seed(20)
+    data<-data[sample(nrow(data)),]
+    data<-data[sample(nrow(data)),]
+    glimpse(data)
+    
+    corpus<-Corpus(VectorSource(data$text))
+    corpus
+    inspect(corpus[1:10])
+    
+    # membersihkan data data yang tidak dibutuhkan 
+    corpus.clean<-corpus%>%
+      tm_map(content_transformer(tolower))%>%
+      tm_map(removePunctuation)%>%
+      tm_map(removeNumbers)%>%
+      tm_map(removeWords,stopwords(kind="en"))%>%
+      tm_map(stripWhitespace)
+    dtm<-DocumentTermMatrix(corpus.clean)
+    
+    data.train<-data[1:400,]
+    data.test<-data[401:100,]
+    
+    dtm.train<-dtm[1:400,]
+    dtm.test<-dtm[401:100,]
+    
+    corpus.clean.train<-corpus.clean[1:400]
+    corpus.clean.test<-corpus.clean[401:100]
+    
+    dim(dtm.train)
+    fivefreq<-findFreqTerms(dtm.train,5)
+    length(fivefreq)
+    
+    dtm.train.nb<-DocumentTermMatrix(corpus.clean.train,control = list(dictionary=fivefreq))
+    
+    dtm.test.nb<-DocumentTermMatrix(corpus.clean.test,control = list(dictionary=fivefreq))
+    
+    dim(dtm.test.nb)
+    
+    convert_count <- function(x){
+      y<-ifelse(x>0,1,0)
+      y<-factor(y,levels=c(0,1),labels=c("no","yes"))
+      y
+    }
+    trainNB<-apply(dtm.train.nb,2,convert_count)
+    testNB<-apply(dtm.test.nb,1,convert_count)
+    
+    wordcloud(corpus.clean,min.freq = 4, max.words=50, random.order=F, colors=brewer.pal(8,"Dark2"),height = "1000px")
+  })
+}
+shinyApp(ui = ui, server = server)
+```
