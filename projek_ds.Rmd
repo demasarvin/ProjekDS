@@ -129,6 +129,7 @@ wordcloud(corpus.clean,min.freq = 4,max.words=100,random.order=F,colors=brewer.p
 
 ```{r}
 # Shiny
+library(shiny)
 datas <- data
 
 tweet<- datas$text
